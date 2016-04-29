@@ -41,9 +41,15 @@ delete args.chesserMaster;
 
 console.log("Connecting to Chess-Master at " + chesserMaster);
 
-var ws = new WebSocket(chesserMaster);
 
-ws.onopen = function open() {
+
+// create the "scapegoat" client
+
+var scapegoat = {};
+
+scapegoat.ws = new WebSocket(chesserMaster);
+
+scapegoat.ws.onopen = function open() {
     console.log("Connected to Chesser-Master");
     var str = JSON.stringify({
         event: "register",
@@ -59,16 +65,34 @@ ws.onopen = function open() {
         console.log("TO CHESSER-SERVER -> " + str);
     }
 
-    ws.send(str);
+    scapegoat.ws.send(str);
     console.log("Registration data sent. Done till game is over");
+
+    var totalTime = 1.8e6; // 30 min
+    var timeInterval = 1000; // 1 sec
+    var count = 0;
+    scapegoat.interval = setInterval(function intervalCheck() {
+        if(timeInterval * count > totalTime) {
+            console.error("Waited 30 min; human on Chesser never connected. Exiting...");
+            process.exit(1);
+        }
+
+        console.log("[" + (++count) + "]: no connection Chesser");
+    }, timeInterval);
 };
 
-ws.onerror = function(err) {
-    console.error(err);
+scapegoat.ws.onerror = function(err) {
+    if(err.code === "ENETUNREACH" || err.code === "ECONNREFUSED") {
+        console.error("Could not reach Chesser-Master at " + chesserMaster);
+    }
+    else {
+        console.error(err);
+    }
+
     process.exit(1);
 };
 
-ws.onmessage = function(message) {
+scapegoat.ws.onmessage = function(message) {
     if(args.printIO) {
         console.log("FROM CHESSER-SERVER <- " + message.data);
     }
@@ -87,19 +111,23 @@ ws.onmessage = function(message) {
     if(parsed.event === "message") {
         console.log(parsed.data);
     }
+    else if(parsed.event === "bridged") {
+        console.log("Connection bridged!");
+        clearInterval(scapegoat.interval);
+    }
     else {
         console.log(parsed);
     }
 };
 
-ws.onclose = function() {
+scapegoat.ws.onclose = function() {
     console.log("Connection closed...");
     process.exit(0);
 };
 
-
+// if after 30 seconds no connection to Chesser-Master can be established, kill yourself
 setTimeout(function() {
-    if(ws.readyState === WebSocket.CONNECTING) {
+    if(scapegoat.ws.readyState === WebSocket.CONNECTING) {
         console.log("30 seconds and can't connect to Chesser-Master, exiting...");
         process.exit(1);
     }
